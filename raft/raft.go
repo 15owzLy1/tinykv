@@ -165,13 +165,29 @@ func newRaft(c *Config) *Raft {
 		panic(err.Error())
 	}
 	// Your Code Here (2A).
-	return nil
+	return &Raft{
+		id:               c.ID,
+		Term:             0,
+		Vote:             None,
+		heartbeatTimeout: c.HeartbeatTick,
+		electionTimeout:  c.ElectionTick,
+		heartbeatElapsed: 0,
+		electionElapsed:  0,
+		leadTransferee:   None,
+		PendingConfIndex: 0,
+		RaftLog:          newLog(c.Storage),
+		Prs:              make(map[uint64]*Progress),
+		State:            StateFollower,
+		votes:            make(map[uint64]bool),
+		msgs:             make([]pb.Message, 0),
+	}
 }
 
 // sendAppend sends an append RPC with new entries (if any) and the
 // current commit index to the given peer. Returns true if a message was sent.
 func (r *Raft) sendAppend(to uint64) bool {
 	// Your Code Here (2A).
+
 	return false
 }
 
