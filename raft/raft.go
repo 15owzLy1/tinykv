@@ -16,6 +16,7 @@ package raft
 
 import (
 	"errors"
+	"math/rand"
 
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
@@ -164,13 +165,17 @@ func newRaft(c *Config) *Raft {
 	if err := c.validate(); err != nil {
 		panic(err.Error())
 	}
+	hardState, confState, err := c.Storage.InitialState()
+	if err != nil {
+		panic(err.Error())
+	}
 	// Your Code Here (2A).
-	return &Raft{
+	raft := &Raft{
 		id:               c.ID,
-		Term:             0,
-		Vote:             None,
+		Term:             hardState.Term,
+		Vote:             hardState.Vote,
 		heartbeatTimeout: c.HeartbeatTick,
-		electionTimeout:  c.ElectionTick,
+		electionTimeout:  c.ElectionTick + rand.Intn(c.ElectionTick),
 		heartbeatElapsed: 0,
 		electionElapsed:  0,
 		leadTransferee:   None,
@@ -181,14 +186,55 @@ func newRaft(c *Config) *Raft {
 		votes:            make(map[uint64]bool),
 		msgs:             make([]pb.Message, 0),
 	}
+	if c.peers == nil {
+		c.peers = confState.Nodes
+	}
+	for _, peer := range c.peers {
+		raft.Prs[peer] = &Progress{
+			Match: 0,
+			Next:  0,
+		}
+	}
+	return raft
 }
 
 // sendAppend sends an append RPC with new entries (if any) and the
 // current commit index to the given peer. Returns true if a message was sent.
 func (r *Raft) sendAppend(to uint64) bool {
 	// Your Code Here (2A).
+	lastIndex := r.RaftLog.LastIndex()
+	preLogIndex := r.Prs[to].Next
+	preLogTerm, err := r.RaftLog.Term(preLogIndex)
+	if err != nil {
+		if err == ErrCompacted {
+			return true
+		}
+		return false
+	}
+	ents, err := r.RaftLog.storage.Entries(preLogIndex, lastIndex+1)
 
-	return false
+	msgEnts := make([]*pb.Entry, 0, len(ents))
+
+	for _, ent := range ents {
+		msgEnts = append(msgEnts, &pb.Entry{
+			Term:  ent.Term,
+			Index: ent.Index,
+			Data:  ent.Data,
+		})
+	}
+
+	msg := pb.Message{
+		MsgType: pb.MessageType_MsgAppend,
+		From:    r.id,
+		To:      to,
+		Term:    r.Term,
+		LogTerm: preLogTerm,
+		Index:   preLogIndex,
+		Entries: msgEnts,
+		Commit:  r.RaftLog.committed,
+	}
+	r.msgs = append(r.msgs, msg)
+	return true
 }
 
 // sendHeartbeat sends a heartbeat RPC to the given peer.
